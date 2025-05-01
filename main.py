@@ -1,6 +1,6 @@
-import sys
 import os
 import re
+import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QPushButton, QFileDialog, 
                              QTextEdit, QVBoxLayout, QWidget, QLabel, QTabWidget, 
                              QTableWidget, QTableWidgetItem, QMessageBox, QTreeWidget, 
@@ -12,10 +12,24 @@ from backend import PEAnalyzer
 
 class HeaderEditDialog(QDialog):
     VALIDATION_RULES = {
-        'e_magic': (r'^0x5a4d$', "Must be 0x5A4D (MZ)"),
-        'e_lfanew': (r'^0x[0-9a-fA-F]{4,8}$', "Invalid PE offset"),
-        'Machine': (r'^0x[0-9a-fA-F]{4}$', "Must be 2-byte hex value"),
-        'Characteristics': (r'^0x[0-9a-fA-F]{4}$', "Invalid characteristics flags")
+        # Only validate format, not specific values
+        'e_magic': (r'^0x[0-9a-fA-F]+$', "Must be a hex value"),
+        'e_lfanew': (r'^0x[0-9a-fA-F]+$', "Must be a hex value"),
+        'Machine': (r'^0x[0-9a-fA-F]+$', "Must be a hex value"),
+        'NumberOfSections': (r'^\d+$', "Must be a number"),
+        'TimeDateStamp': (r'^\d+$', "Must be a number"),
+        'Characteristics': (r'^0x[0-9a-fA-F]+$', "Must be a hex value"),
+        'Magic': (r'^0x[0-9a-fA-F]+$', "Must be a hex value"),
+        'MajorLinkerVersion': (r'^\d+$', "Must be a number"),
+        'MinorLinkerVersion': (r'^\d+$', "Must be a number"),
+        'SizeOfCode': (r'^\d+$', "Must be a number"),
+        'AddressOfEntryPoint': (r'^0x[0-9a-fA-F]+$', "Must be a hex value")
+    }
+
+    HEADER_MAPPING = {
+        "DOS Header": "DOS_HEADER",
+        "File Header": "FILE_HEADER",
+        "Optional Header": "OPTIONAL_HEADER"
     }
 
     def __init__(self, headers, parent=None):
@@ -24,37 +38,54 @@ class HeaderEditDialog(QDialog):
         self.headers = headers
         self.layout = QFormLayout()
         
-        # Create input fields for each header
+        # Store original values
+        self.original_values = {}
         self.header_inputs = {}
+        
         for header_type, fields in headers.items():
             for field, value in fields.items():
                 input_field = QLineEdit(str(value))
                 self.layout.addRow(f"{header_type} - {field}", input_field)
                 self.header_inputs[f"{header_type}_{field}"] = input_field
+                self.original_values[f"{header_type}_{field}"] = str(value)
         
-        # Add buttons
+        # Add restore button
+        button_layout = QHBoxLayout()
         self.save_button = QPushButton("Save Changes")
         self.save_button.clicked.connect(self.accept)
+        self.restore_button = QPushButton("Restore Original")
+        self.restore_button.clicked.connect(self.restore_original)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.reject)
         
-        self.layout.addRow(self.save_button, self.cancel_button)
+        button_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.restore_button)
+        button_layout.addWidget(self.cancel_button)
+        self.layout.addRow("", button_layout)
         self.setLayout(self.layout)
     
+    def restore_original(self):
+        """Restore original values"""
+        for key, value in self.original_values.items():
+            self.header_inputs[key].setText(value)
+
     def get_edited_values(self):
         edited_values = {}
         for key, input_field in self.header_inputs.items():
-            header_type, field = key.split('_', 1)
-            edited_values[header_type] = {field: input_field.text()}
+            display_header_type, field = key.split('_', 1)
+            header_type = self.HEADER_MAPPING.get(display_header_type)
+            if not header_type:
+                continue
+            if header_type not in edited_values:
+                edited_values[header_type] = {}
+            edited_values[header_type][field] = input_field.text()
         return edited_values
 
     def accept(self):
-        # Validate inputs before accepting
         errors = []
         for key, input_field in self.header_inputs.items():
             _, field = key.split('_', 1)
             value = input_field.text()
-            
             if field in self.VALIDATION_RULES:
                 regex, msg = self.VALIDATION_RULES[field]
                 if not re.match(regex, value):
@@ -66,6 +97,22 @@ class HeaderEditDialog(QDialog):
             super().accept()
 
 class SectionEditDialog(QDialog):
+    VALIDATION_RULES = {
+        'Virtual Size': (r'^0x[0-9a-fA-F]+$', "Must be a valid size"),
+        'Virtual Address': (r'^0x[0-9a-fA-F]+$', "Must be a valid address"),
+        'Raw Size': (r'^0x[0-9a-fA-F]+$', "Must be a valid size"),
+        'Characteristics': (r'^0x[0-9a-fA-F]+$', "Must be valid characteristics")
+    }
+
+    SECTION_FIELD_MAPPING = {
+        'Virtual Size': 'Misc_VirtualSize',
+        'Virtual Address': 'VirtualAddress',
+        'Raw Size': 'SizeOfRawData',
+        'Raw Address': 'PointerToRawData',
+        'Characteristics': 'Characteristics',
+        'Name': 'Name'
+    }
+
     def __init__(self, section_name, section_data, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Edit Section: {section_name}")
@@ -73,15 +120,14 @@ class SectionEditDialog(QDialog):
         self.section_data = section_data
         
         self.layout = QFormLayout()
-        
-        # Create input fields for each section property
         self.field_inputs = {}
-        for field, value in section_data.items():
-            input_field = QLineEdit(str(value))
-            self.layout.addRow(f"{field}:", input_field)
-            self.field_inputs[field] = input_field
         
-        # Add buttons
+        for display_field, value in section_data.items():
+            if display_field in self.SECTION_FIELD_MAPPING:
+                input_field = QLineEdit(str(value))
+                self.layout.addRow(f"{display_field}:", input_field)
+                self.field_inputs[display_field] = input_field
+        
         button_layout = QHBoxLayout()
         self.save_button = QPushButton("Save Changes")
         self.save_button.clicked.connect(self.accept)
@@ -90,15 +136,29 @@ class SectionEditDialog(QDialog):
         
         button_layout.addWidget(self.save_button)
         button_layout.addWidget(self.cancel_button)
-        
         self.layout.addRow("", button_layout)
         self.setLayout(self.layout)
     
     def get_edited_values(self):
         edited_values = {}
-        for field, input_field in self.field_inputs.items():
-            edited_values[field] = input_field.text()
+        for display_field, input_field in self.field_inputs.items():
+            actual_field = self.SECTION_FIELD_MAPPING.get(display_field, display_field)
+            edited_values[actual_field] = input_field.text()
         return edited_values
+
+    def accept(self):
+        errors = []
+        for display_field, input_field in self.field_inputs.items():
+            value = input_field.text()
+            if display_field in self.VALIDATION_RULES:
+                regex, msg = self.VALIDATION_RULES[display_field]
+                if not re.match(regex, value):
+                    errors.append(f"{display_field}: {msg}")
+        
+        if errors:
+            QMessageBox.warning(self, "Validation Error", "\n".join(errors))
+        else:
+            super().accept()
 
 class PEAnalyzerGUI(QMainWindow):
     def __init__(self):
@@ -125,6 +185,7 @@ class PEAnalyzerGUI(QMainWindow):
         self.imports_tab = QWidget()
         self.strings_tab = QWidget()
         self.risk_tab = QWidget()
+        self.instructions_tab = QWidget()
         
         # Setup tabs
         self.setup_headers_tab()
@@ -132,6 +193,7 @@ class PEAnalyzerGUI(QMainWindow):
         self.setup_imports_tab()
         self.setup_strings_tab()
         self.setup_risk_tab()
+        self.setup_instructions_tab()
         
         # Add tabs
         self.tab_widget.addTab(self.headers_tab, "Headers")
@@ -139,6 +201,7 @@ class PEAnalyzerGUI(QMainWindow):
         self.tab_widget.addTab(self.imports_tab, "Imports")
         self.tab_widget.addTab(self.strings_tab, "Strings")
         self.tab_widget.addTab(self.risk_tab, "Risk Assessment")
+        self.tab_widget.addTab(self.instructions_tab, "Instructions")
         
         main_layout.addWidget(self.tab_widget)
         
@@ -240,21 +303,90 @@ class PEAnalyzerGUI(QMainWindow):
         layout.addWidget(self.risk_tree)
         self.risk_tab.setLayout(layout)
     
+    def setup_instructions_tab(self):
+        layout = QVBoxLayout()
+        instructions_text = QTextEdit()
+        instructions_text.setReadOnly(True)
+        
+        # Updated HTML formatted instructions
+        instructions = """
+        <h2>PE File Analysis and Editing Instructions</h2>
+        
+        <h3>Header Editing Capabilities:</h3>
+        <p style="color: green;">All headers can be edited with any values that match the required format:</p>
+        <ul>
+            <li><b>Hex Values</b> (must start with 0x):
+                <br>- e_magic
+                <br>- e_lfanew
+                <br>- Machine
+                <br>- Characteristics
+                <br>- Magic
+                <br>- AddressOfEntryPoint</li>
+            <li><b>Decimal Values</b>:
+                <br>- NumberOfSections
+                <br>- TimeDateStamp
+                <br>- MajorLinkerVersion
+                <br>- MinorLinkerVersion
+                <br>- SizeOfCode</li>
+        </ul>
+
+        <h3>Common Values (For Reference):</h3>
+        <ul>
+            <li><b>e_magic</b>: Usually 0x5A4D (MZ)</li>
+            <li><b>Machine</b>:
+                <br>- 0x14C (x86)
+                <br>- 0x8664 (x64)</li>
+            <li><b>Magic</b>:
+                <br>- 0x10B (PE32)
+                <br>- 0x20B (PE32+)</li>
+            <li><b>Characteristics</b>:
+                <br>- 0x2102 (Executable)
+                <br>- 0x2000 (DLL)</li>
+        </ul>
+
+        <h3>Important Notes:</h3>
+        <ul>
+            <li>All headers can be edited with any values</li>
+            <li>The tool will save modifications regardless of values</li>
+            <li>A backup is automatically created before saving</li>
+            <li>Use 'Restore Original' if needed</li>
+            <li>Keep note of original values for reference</li>
+        </ul>
+
+        <h3>Editing Process:</h3>
+        <ol>
+            <li>Select headers to edit</li>
+            <li>Enter new values (following format requirements)</li>
+            <li>Click 'Save Changes'</li>
+            <li>Use 'Save Modified PE' to save the file</li>
+            <li>If needed, use the backup file to restore original state</li>
+        </ol>
+        """
+        
+        instructions_text.setHtml(instructions)
+        layout.addWidget(instructions_text)
+        self.instructions_tab.setLayout(layout)
+    
     def load_pe_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open PE File", "", "Executable Files (*.exe *.dll)")
         if file_path:
-            self.pe_analyzer = PEAnalyzer(file_path)
-            load_result = self.pe_analyzer.load_file()
-            
-            if load_result is True:
-                self.toggle_buttons(True)
-                self.populate_headers()
-                self.populate_sections()
-                self.populate_imports()
-                self.populate_strings()
-                self.populate_risk_assessment()
-            else:
-                QMessageBox.warning(self, "Error", str(load_result))
+            try:
+                self.pe_analyzer = PEAnalyzer(file_path)
+                load_result = self.pe_analyzer.load_file()
+                
+                if load_result is True:
+                    self.toggle_buttons(True)
+                    self.populate_headers()
+                    self.populate_sections()
+                    self.populate_imports()
+                    self.populate_strings()
+                    self.populate_risk_assessment()
+                else:
+                    QMessageBox.warning(self, "Warning", 
+                        "File loaded with some issues. You can still view and edit headers.")
+                    self.toggle_buttons(True)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Could not load file: {str(e)}")
                 self.toggle_buttons(False)
     
     def populate_headers(self):
@@ -339,13 +471,22 @@ class PEAnalyzerGUI(QMainWindow):
         self.risk_tree.clear()
         details = risk_assessment['details']
         
+        # Add risky APIs with descriptions
         apis_item = QTreeWidgetItem(self.risk_tree, ["Suspicious APIs"])
         for api in details.get('risky_apis', []):
-            QTreeWidgetItem(apis_item, [api])
+            api_details = details['api_details'].get(api, {})
+            api_item = QTreeWidgetItem(apis_item, [api])
+            if api_details:
+                QTreeWidgetItem(api_item, ["Risk Score", str(api_details['risk_score'])])
+                QTreeWidgetItem(api_item, ["Description", api_details['description']])
         
+        # Add suspicious strings
         strings_item = QTreeWidgetItem(self.risk_tree, ["Suspicious Strings"])
         for string in details.get('suspicious_strings', []):
             QTreeWidgetItem(strings_item, [string])
+        
+        # Expand all items
+        self.risk_tree.expandAll()
     
     def get_risk_color(self, score):
         if score < 30: return 'green'
@@ -377,12 +518,22 @@ class PEAnalyzerGUI(QMainWindow):
         
         if edit_dialog.exec() == QDialog.DialogCode.Accepted:
             edited_values = edit_dialog.get_edited_values()
+            update_success = False
+            error_messages = []
+            
             for header_type, fields in edited_values.items():
                 for field, value in fields.items():
                     result = self.pe_analyzer.edit_header(header_type, field, value)
-                    if "Error" in result:
-                        QMessageBox.warning(self, "Edit Error", result)
-            self.populate_headers()
+                    if "Error" in result or "Invalid" in result:
+                        error_messages.append(result)
+                    else:
+                        update_success = True
+            
+            if error_messages:
+                QMessageBox.warning(self, "Edit Errors", "\n".join(error_messages))
+            if update_success:
+                self.populate_headers()
+                QMessageBox.information(self, "Success", "Header updates applied successfully")
     
     def edit_selected_section(self):
         if not self.pe_analyzer:
@@ -405,11 +556,21 @@ class PEAnalyzerGUI(QMainWindow):
         edit_dialog = SectionEditDialog(section_name, sections[section_name], self)
         if edit_dialog.exec() == QDialog.DialogCode.Accepted:
             edited_values = edit_dialog.get_edited_values()
+            update_success = False
+            error_messages = []
+            
             for field, value in edited_values.items():
                 result = self.pe_analyzer.edit_section(section_name, field, value)
-                if "Error" in result:
-                    QMessageBox.warning(self, "Edit Error", result)
-            self.populate_sections()
+                if "Error" in result or "not found" in result:
+                    error_messages.append(result)
+                else:
+                    update_success = True
+                    
+            if error_messages:
+                QMessageBox.warning(self, "Edit Errors", "\n".join(error_messages))
+            if update_success:
+                self.populate_sections()
+                QMessageBox.information(self, "Success", "Section updates applied successfully")
     
     def save_risk_report(self):
         if not self.pe_analyzer:
@@ -444,10 +605,18 @@ class PEAnalyzerGUI(QMainWindow):
         
         if new_file_path:
             try:
+                # Create backup first
+                backup_path = new_file_path + '.backup'
+                if os.path.exists(new_file_path):
+                    import shutil
+                    shutil.copy2(new_file_path, backup_path)
+                
                 result = self.pe_analyzer.save_modified_pe(new_file_path)
-                QMessageBox.information(self, "PE File Saved", result)
+                QMessageBox.information(self, "PE File Saved", 
+                    f"File saved successfully.\nBackup created at: {backup_path}")
             except Exception as e:
-                QMessageBox.warning(self, "Error", str(e))
+                QMessageBox.warning(self, "Error", 
+                    f"Error saving file: {str(e)}\nYou can find the backup at: {backup_path}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

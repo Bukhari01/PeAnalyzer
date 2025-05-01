@@ -5,22 +5,52 @@ import os
 import re
 
 class PEAnalyzer:
+    # Dictionary of potentially risky Windows APIs with risk scores and descriptions
     RISKY_APIS = {
-        "VirtualAlloc": 5,
-        "VirtualProtect": 4,
-        "WriteProcessMemory": 7,
-        "CreateRemoteThread": 8,
-        "LoadLibrary": 4,
-        "GetProcAddress": 5,
-        "OpenProcess": 6,
-        "ReadProcessMemory": 6,
-        "ShellExecute": 5,
-        "WinExec": 5,
-        "URLDownloadToFile": 7,
-        "InternetOpenUrl": 6,
-        "CreateMutex": 3,
-        "SetWindowsHookEx": 7,
-        "RegisterHotKey": 3
+        # Memory manipulation APIs
+        "VirtualAlloc": {"score": 5, "description": "Allocates memory in the virtual address space of the calling process"},
+        "VirtualProtect": {"score": 4, "description": "Changes the protection on a region of committed pages in the virtual address space"},
+        "WriteProcessMemory": {"score": 7, "description": "Writes data to an area of memory in a specified process"},
+        "ReadProcessMemory": {"score": 6, "description": "Reads data from an area of memory in a specified process"},
+        
+        # Process/Thread manipulation
+        "CreateRemoteThread": {"score": 8, "description": "Creates a thread that runs in the virtual address space of another process"},
+        "OpenProcess": {"score": 6, "description": "Opens an existing local process object"},
+        "CreateProcess": {"score": 5, "description": "Creates a new process and its primary thread"},
+        "TerminateProcess": {"score": 4, "description": "Terminates the specified process and all of its threads"},
+        
+        # DLL/Module manipulation
+        "LoadLibrary": {"score": 4, "description": "Loads the specified module into the address space of the calling process"},
+        "GetProcAddress": {"score": 5, "description": "Retrieves the address of an exported function or variable from the specified DLL"},
+        "GetModuleHandle": {"score": 3, "description": "Retrieves a module handle for the specified module"},
+        
+        # File system operations
+        "CreateFile": {"score": 4, "description": "Creates or opens a file or I/O device"},
+        "WriteFile": {"score": 4, "description": "Writes data to the specified file or input/output (I/O) device"},
+        "ReadFile": {"score": 3, "description": "Reads data from the specified file or input/output (I/O) device"},
+        
+        # Network operations
+        "URLDownloadToFile": {"score": 7, "description": "Downloads a file from the Internet"},
+        "InternetOpenUrl": {"score": 6, "description": "Opens a resource specified by a complete FTP or HTTP URL"},
+        "WSAStartup": {"score": 3, "description": "Initiates use of the Winsock DLL by a process"},
+        "connect": {"score": 4, "description": "Establishes a connection to a specified socket"},
+        
+        # System manipulation
+        "ShellExecute": {"score": 5, "description": "Performs an operation on a specified file"},
+        "WinExec": {"score": 5, "description": "Runs the specified application"},
+        "CreateMutex": {"score": 3, "description": "Creates or opens a named or unnamed mutex object"},
+        "SetWindowsHookEx": {"score": 7, "description": "Installs an application-defined hook procedure into a hook chain"},
+        "RegisterHotKey": {"score": 3, "description": "Defines a system-wide hot key"},
+        
+        # Registry operations
+        "RegCreateKey": {"score": 4, "description": "Creates the specified registry key"},
+        "RegSetValue": {"score": 4, "description": "Sets the data for the specified value in the specified registry key"},
+        "RegOpenKey": {"score": 3, "description": "Opens the specified registry key"},
+        
+        # Anti-debugging/anti-analysis
+        "IsDebuggerPresent": {"score": 6, "description": "Determines whether the calling process is being debugged"},
+        "CheckRemoteDebuggerPresent": {"score": 6, "description": "Determines whether the specified process is being debugged"},
+        "OutputDebugString": {"score": 3, "description": "Sends a string to the debugger for display"}
     }
 
     def __init__(self, file_path):
@@ -33,72 +63,83 @@ class PEAnalyzer:
             os.makedirs(self.results_folder)
 
     def load_file(self):
-        """Loads the PE file."""
+        """Loads the PE file with minimal validation."""
         try:
-            self.pe = pefile.PE(self.file_path)
+            # Load PE file with minimal validation
+            self.pe = pefile.PE(self.file_path, fast_load=True)
+            # Parse directories we need
+            self.pe.parse_data_directories([
+                pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT'],
+                pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_EXPORT']
+            ])
             return True
         except Exception as e:
-            return str(e)
+            return f"Error loading file: {str(e)}"
 
     def get_headers(self):
-        """Comprehensive header extraction."""
-        if not self.pe:
-            return "PE file not loaded."
-
-        headers = {
-            "DOS Header": {
-                "e_magic": hex(self.pe.DOS_HEADER.e_magic),
-                "e_lfanew": hex(self.pe.DOS_HEADER.e_lfanew)
-            },
-            "File Header": {
-                "Machine": hex(self.pe.FILE_HEADER.Machine),
-                "Number of Sections": self.pe.FILE_HEADER.NumberOfSections,
-                "Time Date Stamp": self.pe.FILE_HEADER.TimeDateStamp,
-                "Characteristics": hex(self.pe.FILE_HEADER.Characteristics)
-            },
-            "Optional Header": {
-                "Magic": hex(self.pe.OPTIONAL_HEADER.Magic),
-                "Major Linker Version": self.pe.OPTIONAL_HEADER.MajorLinkerVersion,
-                "Minor Linker Version": self.pe.OPTIONAL_HEADER.MinorLinkerVersion,
-                "Size of Code": self.pe.OPTIONAL_HEADER.SizeOfCode,
-                "Entry Point": hex(self.pe.OPTIONAL_HEADER.AddressOfEntryPoint)
-            }
-        }
-        return headers
-
-    def edit_header(self, header_type, field, value):
-        """Edit specific header fields."""
+        """Get headers with minimal processing."""
         if not self.pe:
             return "PE file not loaded."
 
         try:
-            # Convert value to appropriate type (hex or int)
-            if value.startswith('0x'):
-                value = int(value, 16)
-            else:
-                value = int(value)
-
-            # Edit DOS Header
-            if header_type == "DOS_HEADER":
-                if hasattr(self.pe.DOS_HEADER, field):
-                    setattr(self.pe.DOS_HEADER, field, value)
-                    return f"Updated DOS Header {field}"
-
-            # Edit File Header
-            elif header_type == "FILE_HEADER":
-                if hasattr(self.pe.FILE_HEADER, field):
-                    setattr(self.pe.FILE_HEADER, field, value)
-                    return f"Updated File Header {field}"
-
-            # Edit Optional Header
-            elif header_type == "OPTIONAL_HEADER":
-                if hasattr(self.pe.OPTIONAL_HEADER, field):
-                    setattr(self.pe.OPTIONAL_HEADER, field, value)
-                    return f"Updated Optional Header {field}"
-
-            return f"Invalid field: {field}"
+            headers = {
+                "DOS Header": {
+                    "e_magic": hex(self.pe.DOS_HEADER.e_magic),
+                    "e_lfanew": hex(self.pe.DOS_HEADER.e_lfanew)
+                },
+                "File Header": {
+                    "Machine": hex(self.pe.FILE_HEADER.Machine),
+                    "NumberOfSections": self.pe.FILE_HEADER.NumberOfSections,
+                    "TimeDateStamp": self.pe.FILE_HEADER.TimeDateStamp,
+                    "Characteristics": hex(self.pe.FILE_HEADER.Characteristics)
+                },
+                "Optional Header": {
+                    "Magic": hex(self.pe.OPTIONAL_HEADER.Magic),
+                    "MajorLinkerVersion": self.pe.OPTIONAL_HEADER.MajorLinkerVersion,
+                    "MinorLinkerVersion": self.pe.OPTIONAL_HEADER.MinorLinkerVersion,
+                    "SizeOfCode": self.pe.OPTIONAL_HEADER.SizeOfCode,
+                    "AddressOfEntryPoint": hex(self.pe.OPTIONAL_HEADER.AddressOfEntryPoint)
+                }
+            }
+            return headers
         except Exception as e:
-            return f"Error modifying header: {e}"
+            return {"Error": str(e)}
+
+    def edit_header(self, header_type, field, value):
+        """Edit header fields with minimal validation."""
+        if not self.pe:
+            return "PE file not loaded."
+
+        try:
+            # Convert value to appropriate type
+            if isinstance(value, str):
+                if value.startswith('0x'):
+                    value = int(value, 16)
+                else:
+                    value = int(value)
+
+            # Get header object
+            header_obj = None
+            if header_type == "DOS_HEADER":
+                header_obj = self.pe.DOS_HEADER
+            elif header_type == "FILE_HEADER":
+                header_obj = self.pe.FILE_HEADER
+            elif header_type == "OPTIONAL_HEADER":
+                header_obj = self.pe.OPTIONAL_HEADER
+
+            if not header_obj:
+                return f"Invalid header type: {header_type}"
+
+            # Set the value directly
+            setattr(header_obj, field, value)
+            
+            # Force update of PE structure
+            self.pe.__data__ = self.pe.__data__
+
+            return f"Updated {header_type}.{field}"
+
+        except Exception as e:
+            return f"Error modifying header: {str(e)}"
 
     def get_sections(self):
         """Extracts sections with detailed information."""
@@ -121,23 +162,40 @@ class PEAnalyzer:
             return "PE file not loaded."
 
         try:
+            # Find the section
+            target_section = None
             for section in self.pe.sections:
-                decoded_name = section.Name.decode().strip('\x00')
-                if decoded_name == section_name:
-                    # Convert value to appropriate type
-                    if value.startswith('0x'):
-                        value = int(value, 16)
-                    else:
-                        value = int(value)
-                    
-                    # Edit section attributes
-                    if hasattr(section, field):
-                        setattr(section, field, value)
-                        return f"Updated section {section_name} {field}"
+                if section.Name.decode().strip('\x00') == section_name:
+                    target_section = section
+                    break
             
-            return f"Section {section_name} not found"
+            if not target_section:
+                return f"Section {section_name} not found"
+
+            # Convert value to appropriate type
+            if isinstance(value, str):
+                if value.startswith('0x'):
+                    value = int(value, 16)
+                else:
+                    value = int(value)
+
+            # Get current value for comparison
+            old_value = getattr(target_section, field)
+            
+            # Set new value
+            setattr(target_section, field, value)
+            
+            # Verify the change
+            new_value = getattr(target_section, field)
+            if new_value == value:
+                return f"Successfully updated section {section_name}.{field} from {hex(old_value) if isinstance(old_value, int) else old_value} to {hex(value) if isinstance(value, int) else value}"
+            else:
+                return f"Failed to update section {section_name}.{field}"
+
+        except ValueError as e:
+            return f"Invalid value format: {str(e)}"
         except Exception as e:
-            return f"Error modifying section: {e}"
+            return f"Error modifying section: {str(e)}"
 
     def get_imports(self):
         """Extracts imported APIs with more details."""
@@ -325,7 +383,7 @@ class PEAnalyzer:
         return report_path
 
     def calculate_risk_score(self):
-        """Generates a comprehensive risk score."""
+        """Generates a comprehensive risk score based on imported APIs and suspicious strings."""
         imports = self.get_imports()
         strings = self.get_strings()
         
@@ -335,7 +393,8 @@ class PEAnalyzer:
         risk_score = 0
         suspicious_elements = {
             "risky_apis": [],
-            "suspicious_strings": []
+            "suspicious_strings": [],
+            "api_details": {}
         }
         
         # Check imported APIs
@@ -343,14 +402,28 @@ class PEAnalyzer:
             for func in funcs:
                 func_name = func['name']
                 if func_name in self.RISKY_APIS:
-                    risk_score += self.RISKY_APIS[func_name]
+                    api_info = self.RISKY_APIS[func_name]
+                    risk_score += api_info['score']
                     suspicious_elements["risky_apis"].append(func_name)
+                    suspicious_elements["api_details"][func_name] = {
+                        "risk_score": api_info['score'],
+                        "description": api_info['description']
+                    }
         
-        # Check suspicious strings (customize as needed)
+        # Check suspicious strings
         suspicious_patterns = [
-            "decrypt", "payload", "shellcode", 
-            "inject", "hook", "bypass", 
-            "hidden", "stealth", "persistence"
+            # Anti-analysis
+            "debug", "detect", "analysis", "virtual", "vmware", "vbox",
+            # Malicious behavior
+            "payload", "shellcode", "inject", "hook", "bypass", "exploit",
+            # Persistence
+            "startup", "registry", "service", "scheduled",
+            # Network
+            "http", "ftp", "socket", "connect", "download",
+            # File operations
+            "delete", "modify", "overwrite", "encrypt", "decrypt",
+            # System manipulation
+            "elevate", "privilege", "admin", "system"
         ]
         
         for string in strings:
@@ -358,6 +431,7 @@ class PEAnalyzer:
                 if pattern in string.lower():
                     risk_score += 2
                     suspicious_elements["suspicious_strings"].append(string)
+                    break
         
         return {
             "score": min(risk_score, 100),  # Cap at 100
@@ -379,12 +453,21 @@ class PEAnalyzer:
         return report_path
 
     def save_modified_pe(self, new_file_path):
-        """Saves modified PE file to specified location."""
+        """Saves the modified PE file."""
         if not self.pe:
             return "PE file not loaded."
         
         try:
-            self.pe.write(new_file_path)
+            # Create backup
+            if os.path.exists(new_file_path):
+                backup_path = new_file_path + '.backup'
+                import shutil
+                shutil.copy2(new_file_path, backup_path)
+
+            # Write the modified file
+            with open(new_file_path, 'wb') as f:
+                self.pe.write(f)
+            
             return f"Modified PE saved as {new_file_path}"
         except Exception as e:
-            return f"Error saving modified PE: {e}"
+            return f"Error saving modified PE: {str(e)}"

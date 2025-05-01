@@ -1,0 +1,9 @@
+{
+    "score": 4,
+    "details": {
+        "risky_apis": [
+            "VirtualProtect"
+        ],
+        "suspicious_strings": []
+    }
+}

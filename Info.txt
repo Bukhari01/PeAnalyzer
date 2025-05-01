@@ -1,0 +1,18 @@
+Teacher: Sir Faran 
+Subject: Information Security 
+Assignment # 01
+Date: Thursday, 1st May, 2025 
+Group members: 
+                1- Nafey Javed    (90)
+                2- Mohammad Uzair (43)
+                3- Ali Jone       (73)
+                4- Abdullah jamal (69)
+                5- Abdul Rahim    (97)
+
+Notes: 
+* changed the get strings function to make sure and get null strings as well. * 
+* To edit all the headers click the edit headers button *
+* To edit section headers use the button "edit section* after selecting a section from the section table * 
+* Risk report will be saved to results folder inside the project. Automatically picks name * 
+* I have intentionally removed strict validations so if the user edits a value to an incorrect value the file is 
+  still able to be saved and viewed again * 
