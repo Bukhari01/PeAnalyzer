@@ -49,26 +49,18 @@ class HeaderEditDialog(QDialog):
                 self.header_inputs[f"{header_type}_{field}"] = input_field
                 self.original_values[f"{header_type}_{field}"] = str(value)
         
-        # Add restore button
+        # Add buttons
         button_layout = QHBoxLayout()
         self.save_button = QPushButton("Save Changes")
         self.save_button.clicked.connect(self.accept)
-        self.restore_button = QPushButton("Restore Original")
-        self.restore_button.clicked.connect(self.restore_original)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.reject)
         
         button_layout.addWidget(self.save_button)
-        button_layout.addWidget(self.restore_button)
         button_layout.addWidget(self.cancel_button)
         self.layout.addRow("", button_layout)
         self.setLayout(self.layout)
     
-    def restore_original(self):
-        """Restore original values"""
-        for key, value in self.original_values.items():
-            self.header_inputs[key].setText(value)
-
     def get_edited_values(self):
         edited_values = {}
         for key, input_field in self.header_inputs.items():
@@ -533,7 +525,6 @@ class PEAnalyzerGUI(QMainWindow):
                 QMessageBox.warning(self, "Edit Errors", "\n".join(error_messages))
             if update_success:
                 self.populate_headers()
-                QMessageBox.information(self, "Success", "Header updates applied successfully")
     
     def edit_selected_section(self):
         if not self.pe_analyzer:
@@ -605,18 +596,33 @@ class PEAnalyzerGUI(QMainWindow):
         
         if new_file_path:
             try:
-                # Create backup first
-                backup_path = new_file_path + '.backup'
-                if os.path.exists(new_file_path):
-                    import shutil
-                    shutil.copy2(new_file_path, backup_path)
+                # Create backup of the original file next to where the modified file will be saved
+                original_filename = os.path.basename(self.pe_analyzer.file_path)
+                backup_path = os.path.join(
+                    os.path.dirname(new_file_path),
+                    f"original_{original_filename}"
+                )
                 
+                # First create backup of original file
+                import shutil
+                shutil.copy2(self.pe_analyzer.file_path, backup_path)
+                
+                # Then save the modified file
                 result = self.pe_analyzer.save_modified_pe(new_file_path)
-                QMessageBox.information(self, "PE File Saved", 
-                    f"File saved successfully.\nBackup created at: {backup_path}")
+                
+                if result and "Error" not in result:
+                    QMessageBox.information(self, "PE File Saved", 
+                        f"File saved successfully as: {new_file_path}\n"
+                        f"Original file backed up at: {backup_path}")
+                else:
+                    QMessageBox.warning(self, "Warning", 
+                        f"Error saving file: {result}\n"
+                        f"Original file backed up at: {backup_path}")
+                
             except Exception as e:
-                QMessageBox.warning(self, "Error", 
-                    f"Error saving file: {str(e)}\nYou can find the backup at: {backup_path}")
+                QMessageBox.critical(self, "Error", 
+                    f"Error saving file: {str(e)}\n"
+                    f"Original file backed up at: {backup_path}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

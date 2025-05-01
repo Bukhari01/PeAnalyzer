@@ -106,10 +106,7 @@ class PEAnalyzer:
             return {"Error": str(e)}
 
     def edit_header(self, header_type, field, value):
-        """Edit header fields with minimal validation."""
-        if not self.pe:
-            return "PE file not loaded."
-
+        """Edit header fields and update PE file."""
         try:
             # Convert value to appropriate type
             if isinstance(value, str):
@@ -130,12 +127,10 @@ class PEAnalyzer:
             if not header_obj:
                 return f"Invalid header type: {header_type}"
 
-            # Set the value directly
+            # Set the value and force PE update
             setattr(header_obj, field, value)
+            self.pe.__data__ = self.pe.__data__  # Force update of PE structure
             
-            # Force update of PE structure
-            self.pe.__data__ = self.pe.__data__
-
             return f"Updated {header_type}.{field}"
 
         except Exception as e:
@@ -157,10 +152,7 @@ class PEAnalyzer:
         return sections
 
     def edit_section(self, section_name, field, value):
-        """Edit specific section attributes."""
-        if not self.pe:
-            return "PE file not loaded."
-
+        """Edit section attributes without restrictions."""
         try:
             # Find the section
             target_section = None
@@ -179,21 +171,10 @@ class PEAnalyzer:
                 else:
                     value = int(value)
 
-            # Get current value for comparison
-            old_value = getattr(target_section, field)
-            
-            # Set new value
+            # Set new value without validation
             setattr(target_section, field, value)
-            
-            # Verify the change
-            new_value = getattr(target_section, field)
-            if new_value == value:
-                return f"Successfully updated section {section_name}.{field} from {hex(old_value) if isinstance(old_value, int) else old_value} to {hex(value) if isinstance(value, int) else value}"
-            else:
-                return f"Failed to update section {section_name}.{field}"
+            return f"Updated section {section_name}.{field}"
 
-        except ValueError as e:
-            return f"Invalid value format: {str(e)}"
         except Exception as e:
             return f"Error modifying section: {str(e)}"
 
@@ -454,20 +435,9 @@ class PEAnalyzer:
 
     def save_modified_pe(self, new_file_path):
         """Saves the modified PE file."""
-        if not self.pe:
-            return "PE file not loaded."
-        
         try:
-            # Create backup
-            if os.path.exists(new_file_path):
-                backup_path = new_file_path + '.backup'
-                import shutil
-                shutil.copy2(new_file_path, backup_path)
-
-            # Write the modified file
-            with open(new_file_path, 'wb') as f:
-                self.pe.write(f)
-            
-            return f"Modified PE saved as {new_file_path}"
+            # Write the modified file without validation
+            self.pe.write(filename=new_file_path)
+            return f"Successfully saved modified PE file"
         except Exception as e:
-            return f"Error saving modified PE: {str(e)}"
+            return f"Error saving file: {str(e)}"
